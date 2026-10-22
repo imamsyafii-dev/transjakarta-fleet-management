@@ -8,4 +8,3 @@ CREATE TABLE vehicle_locations (
 
 CREATE INDEX idx_vehicle_locations_vehicle_timestamp
   ON vehicle_locations (vehicle_id, timestamp DESC, id DESC);
-  
