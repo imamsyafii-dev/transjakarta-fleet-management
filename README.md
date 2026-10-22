@@ -6,7 +6,7 @@ RabbitMQ.
 
 ## Status
 
-Tahap 1: fondasi proyek dan HTTP health endpoint.
+Tahap 3: fondasi Go, infrastruktur lokal, dan schema database awal.
 
 ## Requirements
 
@@ -91,3 +91,38 @@ docker compose exec mosquitto \
 docker compose exec mosquitto \
   mosquitto_pub -h localhost -t 'fleet/demo' -m 'hello from MQTT'
 ```
+
+## Database Migration
+
+Migration SQL bersifat append-only. Jangan mengubah migration yang sudah pernah
+diterapkan; buat file migration baru dengan nomor berikutnya.
+
+Migration pertama membuat tabel `vehicle_locations` untuk menyimpan riwayat
+lokasi kendaraan.
+
+| Kolom | Fungsi |
+| --- | --- |
+| `id` | Identitas unik internal setiap data lokasi |
+| `vehicle_id` | ID kendaraan |
+| `latitude` | Latitude, harus antara -90 dan 90 |
+| `longitude` | Longitude, harus antara -180 dan 180 |
+| `timestamp` | Unix timestamp dalam satuan detik |
+
+Terapkan migration pertama ke PostgreSQL lokal:
+
+```bash
+docker compose exec -T postgres \
+  psql -v ON_ERROR_STOP=1 -U fleet -d fleet_management \
+  < migrations/000001_create_vehicle_locations.up.sql
+```
+
+Verifikasi schema:
+
+```bash
+docker compose exec postgres \
+  psql -U fleet -d fleet_management \
+  -c '\d+ vehicle_locations'
+```
+
+Migration `down` hanya untuk reset database lokal dan akan menghapus tabel.
+Jangan jalankan pada data yang ingin disimpan.
