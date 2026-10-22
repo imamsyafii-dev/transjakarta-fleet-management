@@ -16,3 +16,18 @@ Tahap 1: fondasi proyek dan HTTP health endpoint.
 
 ```bash
 go run ./cmd/server
+```
+
+Server berjalan pada `http://localhost:8080`.
+
+## Health Check
+
+```bash
+curl -i http://localhost:8080/health
+```
+
+Respons yang diharapkan:
+
+```json
+{"status":"ok"}
+```
