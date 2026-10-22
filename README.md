@@ -6,7 +6,7 @@ RabbitMQ.
 
 ## Status
 
-Tahap 3: fondasi Go, infrastruktur lokal, dan schema database awal.
+Tahap 4: fondasi Go, infrastruktur lokal, schema database, dan mock MQTT publisher.
 
 ## Requirements
 
@@ -78,9 +78,9 @@ docker compose exec postgres \
 
 RabbitMQ Management tersedia di `http://localhost:15672`.
 
-Untuk menguji Mosquitto, jalankan subscriber dan publisher pada dua terminal terpisah:
-
 Login menggunakan `RABBITMQ_DEFAULT_USER` dan `RABBITMQ_DEFAULT_PASS` dari file `.env`.
+
+Untuk menguji Mosquitto, jalankan subscriber dan publisher pada dua terminal terpisah:
 
 ```bash
 docker compose exec mosquitto \
@@ -126,3 +126,46 @@ docker compose exec postgres \
 
 Migration `down` hanya untuk reset database lokal dan akan menghapus tabel.
 Jangan jalankan pada data yang ingin disimpan.
+
+## Mock MQTT Publisher
+
+Program mock publisher meniru perangkat GPS pada kendaraan. Program ini mengirim
+lokasi kendaraan ke Mosquitto setiap dua detik.
+
+Topic MQTT:
+
+```text
+/fleet/vehicle/{vehicle_id}/location
+```
+
+Jalankan publisher dari root project:
+
+```bash
+unset GOROOT GOPATH
+go run ./cmd/publisher
+```
+
+Konfigurasi dapat diubah melalui environment variable:
+
+| Variable | Default | Fungsi |
+| --- | --- | --- |
+| `MQTT_BROKER` | `tcp://127.0.0.1:1883` | Alamat MQTT broker |
+| `VEHICLE_ID` | `B1234XYZ` | ID kendaraan mock |
+| `MQTT_CLIENT_ID` | `fleet-publisher-{vehicle_id}` | ID koneksi MQTT |
+| `PUBLISH_INTERVAL` | `2s` | Interval pengiriman lokasi |
+
+Contoh menjalankan kendaraan lain setiap satu detik:
+
+```bash
+VEHICLE_ID=B5678ABC PUBLISH_INTERVAL=1s go run ./cmd/publisher
+```
+
+Lihat pesan yang dikirim dengan subscriber Mosquitto:
+
+```bash
+docker compose exec mosquitto \
+  mosquitto_sub -h localhost -t '/fleet/vehicle/+/location' -v
+```
+
+Publisher mengirim payload JSON dengan QoS 1 dan `retained=false`.
+Tekan `Ctrl+C` untuk menghentikannya secara rapi.
