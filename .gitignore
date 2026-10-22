@@ -1,0 +1,12 @@
+# Environment variables and secrets
+.env
+
+# Build output
+bin/
+*.out
+
+# Logs
+*.log
+
+# macOS
+.DS_Store
