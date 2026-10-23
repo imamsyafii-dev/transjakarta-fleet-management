@@ -13,6 +13,8 @@ import (
 	"time"
 
 	"github.com/imamsyafii-dev/transjakarta-fleet-management/internal/location"
+	"github.com/imamsyafii-dev/transjakarta-fleet-management/internal/locationstore"
+	"github.com/imamsyafii-dev/transjakarta-fleet-management/internal/locationwriter"
 	"github.com/imamsyafii-dev/transjakarta-fleet-management/internal/mqttsubscriber"
 )
 
@@ -20,28 +22,59 @@ const (
 	defaultHTTPAddress = ":8080"
 	defaultMQTTBroker  = "tcp://127.0.0.1:1883"
 	defaultMQTTClient  = "fleet-server"
+
+	databaseConnectTimeout = 5 * time.Second
+	locationQueueSize      = 100
+	locationSaveTimeout    = 3 * time.Second
 )
 
 type config struct {
 	httpAddress string
 	mqttBroker  string
 	mqttClient  string
+	databaseURL string
 }
 
 func main() {
 	cfg := loadConfig()
+
+	if cfg.databaseURL == "" {
+		log.Fatal("DATABASE_URL must not be empty")
+	}
+
+	databaseContext, cancelDatabase := context.WithTimeout(
+		context.Background(),
+		databaseConnectTimeout,
+	)
+
+	store, err := locationstore.Open(databaseContext, cfg.databaseURL)
+	cancelDatabase()
+
+	if err != nil {
+		log.Fatalf("open PostgreSQL location store: %v", err)
+	}
+
+	writer, err := locationwriter.New(store, locationwriter.Config{
+		QueueSize:   locationQueueSize,
+		SaveTimeout: locationSaveTimeout,
+	})
+	if err != nil {
+		store.Close()
+		log.Fatalf("create location writer: %v", err)
+	}
 
 	subscriber, err := mqttsubscriber.Connect(
 		mqttsubscriber.Config{
 			Broker:   cfg.mqttBroker,
 			ClientID: cfg.mqttClient,
 		},
-		logLocation,
+		handleLocation(writer),
 	)
 	if err != nil {
+		writer.CloseAndWait()
+		store.Close()
 		log.Fatalf("start MQTT subscriber: %v", err)
 	}
-	defer subscriber.Disconnect()
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", healthHandler)
@@ -77,11 +110,35 @@ func main() {
 		log.Printf("HTTP server stopped unexpectedly: %v", err)
 	}
 
-	shutdownContext, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
+	subscriber.Disconnect()
+
+	shutdownContext, cancelShutdown := context.WithTimeout(
+		context.Background(),
+		5*time.Second,
+	)
+	defer cancelShutdown()
 
 	if err := server.Shutdown(shutdownContext); err != nil {
 		log.Printf("shutdown HTTP server: %v", err)
+	}
+
+	writer.CloseAndWait()
+	store.Close()
+}
+
+func handleLocation(
+	writer *locationwriter.Writer,
+) mqttsubscriber.LocationHandler {
+	return func(value location.Location) {
+		logLocation(value)
+
+		if err := writer.Submit(value); err != nil {
+			log.Printf(
+				"queue location vehicle_id=%s: %v",
+				value.VehicleID,
+				err,
+			)
+		}
 	}
 }
 
@@ -113,6 +170,7 @@ func loadConfig() config {
 		httpAddress: valueOrDefault("HTTP_ADDRESS", defaultHTTPAddress),
 		mqttBroker:  valueOrDefault("MQTT_BROKER", defaultMQTTBroker),
 		mqttClient:  valueOrDefault("MQTT_CLIENT_ID", defaultMQTTClient),
+		databaseURL: valueOrDefault("DATABASE_URL", ""),
 	}
 }
 

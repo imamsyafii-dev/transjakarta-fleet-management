@@ -1,22 +1,32 @@
 # Transjakarta Fleet Management
 
 Backend untuk sistem manajemen armada yang menerima lokasi kendaraan melalui
-MQTT, menyimpan riwayat ke PostgreSQL, dan menghasilkan event geofence melalui
-RabbitMQ.
+MQTT dan menyimpan riwayat ke PostgreSQL. Event geofence melalui RabbitMQ akan
+ditambahkan pada tahap berikutnya.
 
 ## Status
 
-Tahap 5: fondasi Go, infrastruktur lokal, schema database, MQTT publisher, dan MQTT subscriber tervalidasi.
+Tahap 6: fondasi Go, infrastruktur lokal, schema database, MQTT publisher dan subscriber, serta penyimpanan lokasi asynchronous ke PostgreSQL tervalidasi.
 
 ## Requirements
 
 - Go 1.25 atau lebih baru
+- Docker Desktop (termasuk Docker Compose)
 
 ## Menjalankan Server
 
 ```bash
+unset GOROOT GOPATH
+
+set -a
+source .env
+set +a
+
 go run ./cmd/server
 ```
+
+Aplikasi Go tidak memuat file `.env` secara otomatis. Karena itu environment perlu
+dimasukkan ke shell dengan `source .env` sebelum server dijalankan.
 
 Server berjalan pada `http://localhost:8080`.
 
@@ -184,6 +194,11 @@ Jalankan backend server:
 
 ```bash
 unset GOROOT GOPATH
+
+set -a
+source .env
+set +a
+
 go run ./cmd/server
 ```
 
@@ -194,6 +209,7 @@ Konfigurasi server:
 | `HTTP_ADDRESS` | `:8080` | Alamat HTTP server |
 | `MQTT_BROKER` | `tcp://127.0.0.1:1883` | Alamat MQTT broker |
 | `MQTT_CLIENT_ID` | `fleet-server` | ID koneksi MQTT server |
+| `DATABASE_URL` | — (wajib) | URL koneksi PostgreSQL |
 
 Setiap pesan diperiksa sebelum diproses:
 
@@ -203,5 +219,23 @@ Setiap pesan diperiksa sebelum diproses:
 - `vehicle_id` payload harus sama dengan ID pada topic.
 - Latitude, longitude, dan timestamp harus valid.
 
-Pada tahap ini, lokasi valid ditampilkan ke log server. Penyimpanan ke
-PostgreSQL akan ditambahkan pada tahap berikutnya.
+Setiap lokasi valid dicatat di log lalu dimasukkan ke antrean internal berukuran
+100 data. Worker terpisah menyimpan data dari antrean tersebut ke tabel
+`vehicle_locations` di PostgreSQL. Operasi database memiliki timeout tiga detik,
+sehingga callback MQTT tidak tertahan oleh database.
+
+Saat server dihentikan, backend berhenti menerima pesan MQTT baru, menyelesaikan
+data yang sudah ada di antrean, lalu menutup koneksi PostgreSQL.
+
+## Verifikasi Penyimpanan PostgreSQL
+
+Setelah server dan publisher berjalan beberapa detik, periksa lokasi yang
+tersimpan:
+
+```bash
+docker compose exec -T postgres \
+  psql -U fleet -d fleet_management \
+  -c "SELECT id, vehicle_id, latitude, longitude, timestamp FROM vehicle_locations ORDER BY id DESC LIMIT 10;"
+```
+
+Data `vehicle_id` dan koordinat harus sesuai dengan payload mock publisher.
