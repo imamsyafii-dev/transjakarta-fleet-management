@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/imamsyafii-dev/transjakarta-fleet-management/internal/location"
+	"github.com/imamsyafii-dev/transjakarta-fleet-management/internal/locationapi"
 	"github.com/imamsyafii-dev/transjakarta-fleet-management/internal/locationstore"
 	"github.com/imamsyafii-dev/transjakarta-fleet-management/internal/locationwriter"
 	"github.com/imamsyafii-dev/transjakarta-fleet-management/internal/mqttsubscriber"
@@ -26,6 +27,7 @@ const (
 	databaseConnectTimeout = 5 * time.Second
 	locationQueueSize      = 100
 	locationSaveTimeout    = 3 * time.Second
+	locationQueryTimeout   = 3 * time.Second
 )
 
 type config struct {
@@ -54,6 +56,14 @@ func main() {
 		log.Fatalf("open PostgreSQL location store: %v", err)
 	}
 
+	locationAPI, err := locationapi.New(store, locationapi.Config{
+		QueryTimeout: locationQueryTimeout,
+	})
+	if err != nil {
+		store.Close()
+		log.Fatalf("create location API: %v", err)
+	}
+
 	writer, err := locationwriter.New(store, locationwriter.Config{
 		QueueSize:   locationQueueSize,
 		SaveTimeout: locationSaveTimeout,
@@ -78,6 +88,8 @@ func main() {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", healthHandler)
+
+	locationAPI.Register(mux)
 
 	server := &http.Server{
 		Addr:              cfg.httpAddress,

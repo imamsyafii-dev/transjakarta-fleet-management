@@ -6,7 +6,7 @@ ditambahkan pada tahap berikutnya.
 
 ## Status
 
-Tahap 6: fondasi Go, infrastruktur lokal, schema database, MQTT publisher dan subscriber, serta penyimpanan lokasi asynchronous ke PostgreSQL tervalidasi.
+Tahap 7: fondasi Go, infrastruktur lokal, MQTT publisher/subscriber, penyimpanan PostgreSQL asynchronous, dan REST API lokasi tervalidasi.
 
 ## Requirements
 
@@ -41,6 +41,72 @@ Respons yang diharapkan:
 ```json
 {"status":"ok"}
 ```
+
+## REST API Lokasi
+
+### Lokasi Terakhir Kendaraan
+
+```text
+GET /vehicles/{vehicle_id}/location
+```
+
+Contoh:
+
+```bash
+curl -i http://localhost:8080/vehicles/B1234XYZ/location
+```
+
+Respons sukses (`200 OK`):
+
+```json
+{
+  "vehicle_id": "B1234XYZ",
+  "latitude": -6.2088,
+  "longitude": 106.8456,
+  "timestamp": 1715003456
+}
+```
+
+Jika kendaraan belum memiliki lokasi, API mengembalikan `404`:
+
+```json
+{"error":"vehicle location not found"}
+```
+
+### Riwayat Lokasi Kendaraan
+
+```text
+GET /vehicles/{vehicle_id}/history?start={unix_timestamp}&end={unix_timestamp}
+```
+
+Parameter `start` dan `end` wajib berupa Unix timestamp positif. Rentang waktu
+bersifat inklusif dan hasil diurutkan dari lokasi paling lama ke terbaru.
+
+Contoh:
+
+```bash
+curl -i "http://localhost:8080/vehicles/B1234XYZ/history?start=1&end=2000000000"
+```
+
+Respons sukses (`200 OK`) adalah JSON array. Jika tidak ada data pada rentang
+tersebut, responsnya tetap `200 OK` dengan array kosong:
+
+```json
+[]
+```
+
+Request dengan `vehicle_id`, `start`, atau `end` yang tidak valid mengembalikan
+`400 Bad Request`.
+
+## Postman Collection
+
+Import file berikut ke Postman untuk menguji health check dan kedua endpoint API:
+
+```text
+postman/transjakarta-fleet-management.postman_collection.json
+```
+
+Collection menyediakan variable `base_url`, `vehicle_id`, `start`, dan `end`.
 
 ## Infrastruktur Lokal
 
