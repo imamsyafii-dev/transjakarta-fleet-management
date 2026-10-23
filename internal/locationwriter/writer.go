@@ -22,12 +22,14 @@ type Saver interface {
 type Config struct {
 	QueueSize   int
 	SaveTimeout time.Duration
+	OnSaved     func(location.Location)
 }
 
 type Writer struct {
 	saver       Saver
 	jobs        chan location.Location
 	saveTimeout time.Duration
+	onSaved     func(location.Location)
 
 	mu        sync.RWMutex
 	accepting bool
@@ -52,6 +54,7 @@ func New(saver Saver, config Config) (*Writer, error) {
 		saver:       saver,
 		jobs:        make(chan location.Location, config.QueueSize),
 		saveTimeout: config.SaveTimeout,
+		onSaved:     config.OnSaved,
 		accepting:   true,
 		done:        make(chan struct{}),
 	}
@@ -114,6 +117,27 @@ func (writer *Writer) run() {
 				value.VehicleID,
 				err,
 			)
+			continue
 		}
+
+		writer.notifySaved(value)
 	}
+}
+
+func (writer *Writer) notifySaved(value location.Location) {
+	if writer.onSaved == nil {
+		return
+	}
+
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			log.Printf(
+				"location writer OnSaved panicked vehicle_id=%s: %v",
+				value.VehicleID,
+				recovered,
+			)
+		}
+	}()
+
+	writer.onSaved(value)
 }

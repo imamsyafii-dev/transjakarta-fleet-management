@@ -254,6 +254,41 @@ func TestWriterContinuesAfterSaveError(t *testing.T) {
 	}
 }
 
+func TestWriterCallsOnSavedOnlyAfterSuccessfulSave(t *testing.T) {
+	saver := &failingFirstSaver{}
+	var observed []location.Location
+
+	writer, err := New(saver, Config{
+		QueueSize:   2,
+		SaveTimeout: time.Second,
+		OnSaved: func(value location.Location) {
+			observed = append(observed, value)
+		},
+	})
+	if err != nil {
+		t.Fatalf("create writer: %v", err)
+	}
+
+	first := sampleLocation(1)
+	second := sampleLocation(2)
+
+	if err := writer.Submit(first); err != nil {
+		t.Fatalf("submit first location: %v", err)
+	}
+	if err := writer.Submit(second); err != nil {
+		t.Fatalf("submit second location: %v", err)
+	}
+
+	writer.CloseAndWait()
+
+	if len(observed) != 1 {
+		t.Fatalf("OnSaved calls = %d, want 1", len(observed))
+	}
+	if observed[0] != second {
+		t.Fatalf("OnSaved location = %#v, want %#v", observed[0], second)
+	}
+}
+
 func TestWriterUsesSaveTimeout(t *testing.T) {
 	saver := &timeoutSaver{
 		result: make(chan error, 1),

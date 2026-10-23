@@ -1,0 +1,9 @@
+.env
+.git
+.gitignore
+.DS_Store
+bin/
+*.out
+*.log
+README.md
+postman/

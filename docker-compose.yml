@@ -10,6 +10,7 @@ services:
       - "127.0.0.1:5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      - ./migrations/000001_create_vehicle_locations.up.sql:/docker-entrypoint-initdb.d/000001_create_vehicle_locations.sql:ro
     healthcheck:
       test:
         [
@@ -56,6 +57,49 @@ services:
       start_period: 10s
     volumes:
       - rabbitmq_data:/var/lib/rabbitmq
+
+  server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      HTTP_ADDRESS: :8080
+      MQTT_BROKER: tcp://mosquitto:1883
+      MQTT_CLIENT_ID: fleet-server
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable
+      RABBITMQ_URL: amqp://${RABBITMQ_DEFAULT_USER}:${RABBITMQ_DEFAULT_PASS}@rabbitmq:5672/
+      GEOFENCE_LATITUDE: ${GEOFENCE_LATITUDE:--6.2090}
+      GEOFENCE_LONGITUDE: ${GEOFENCE_LONGITUDE:-106.8456}
+      GEOFENCE_RADIUS_METERS: ${GEOFENCE_RADIUS_METERS:-50}
+      GEOFENCE_EVENT_TIMEOUT: ${GEOFENCE_EVENT_TIMEOUT:-3s}
+    ports:
+      - "127.0.0.1:8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mosquitto:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:8080/health || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  geofence-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["/app/geofence-worker"]
+    restart: unless-stopped
+    environment:
+      RABBITMQ_URL: amqp://${RABBITMQ_DEFAULT_USER}:${RABBITMQ_DEFAULT_PASS}@rabbitmq:5672/
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
 
 volumes:
   postgres_data:

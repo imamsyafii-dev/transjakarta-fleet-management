@@ -1,19 +1,23 @@
 # Transjakarta Fleet Management
 
 Backend untuk sistem manajemen armada yang menerima lokasi kendaraan melalui
-MQTT dan menyimpan riwayat ke PostgreSQL. Event geofence melalui RabbitMQ akan
-ditambahkan pada tahap berikutnya.
+MQTT, menyimpan riwayat ke PostgreSQL, dan mengirim event masuk geofence ke
+RabbitMQ.
 
 ## Status
 
-Tahap 7: fondasi Go, infrastruktur lokal, MQTT publisher/subscriber, penyimpanan PostgreSQL asynchronous, dan REST API lokasi tervalidasi.
+Tahap 9: seluruh sistem dapat dijalankan sebagai container Docker Compose.
 
 ## Requirements
 
 - Go 1.25 atau lebih baru
 - Docker Desktop (termasuk Docker Compose)
 
-## Menjalankan Server
+## Menjalankan Server Secara Lokal
+
+Untuk demo utama, gunakan Docker Compose di bagian [Menjalankan Seluruh
+Sistem](#menjalankan-seluruh-sistem). Bagian ini berguna bila proses Go ingin
+dijalankan langsung dari laptop sementara layanan pendukung tetap memakai Docker.
 
 ```bash
 unset GOROOT GOPATH
@@ -114,6 +118,8 @@ Proyek memakai Docker Compose untuk menjalankan layanan pendukung berikut.
 
 | Service | Fungsi | Akses dari laptop |
 | --- | --- | --- |
+| Server | HTTP API, MQTT subscriber, penyimpanan lokasi, dan RabbitMQ publisher | `http://localhost:8080` |
+| Geofence worker | Membaca dan memproses event `geofence_alerts` | — |
 | PostgreSQL | Menyimpan riwayat lokasi kendaraan | `localhost:5432` |
 | Mosquitto | MQTT broker untuk data lokasi IoT | `localhost:1883` |
 | RabbitMQ | Message broker untuk event geofence | `localhost:5672` |
@@ -121,7 +127,7 @@ Proyek memakai Docker Compose untuk menjalankan layanan pendukung berikut.
 
 Semua port hanya dapat diakses dari laptop lokal.
 
-## Menjalankan Infrastruktur
+## Menjalankan Seluruh Sistem
 
 Salin konfigurasi environment lokal:
 
@@ -129,17 +135,35 @@ Salin konfigurasi environment lokal:
 cp .env.example .env
 ```
 
-Jalankan seluruh layanan:
+Build image Go dan jalankan seluruh layanan:
 
 ```bash
-docker compose up -d
+docker compose up --build -d
 docker compose ps
+```
+
+Pada volume PostgreSQL yang masih kosong, migration pertama dijalankan otomatis
+ketika PostgreSQL melakukan inisialisasi. Setelah semua service berstatus
+berjalan, publisher mock di laptop dapat langsung mengirim ke Mosquitto melalui
+`localhost:1883`.
+
+Lihat log komponen aplikasi:
+
+```bash
+docker compose logs -f server geofence-worker
 ```
 
 Hentikan layanan tanpa menghapus data PostgreSQL dan RabbitMQ:
 
 ```bash
 docker compose down
+```
+
+Untuk menghapus seluruh data lokal dan menginisialisasi schema dari awal,
+gunakan perintah berikut dengan hati-hati:
+
+```bash
+docker compose down -v
 ```
 
 ## Verifikasi Layanan
@@ -184,7 +208,9 @@ lokasi kendaraan.
 | `longitude` | Longitude, harus antara -180 dan 180 |
 | `timestamp` | Unix timestamp dalam satuan detik |
 
-Terapkan migration pertama ke PostgreSQL lokal:
+Docker Compose memasang migration ini pada inisialisasi **volume PostgreSQL
+baru**. Jika menjalankan server Go langsung dari laptop terhadap PostgreSQL yang
+belum memiliki tabel, terapkan migration pertama secara manual:
 
 ```bash
 docker compose exec -T postgres \
@@ -256,7 +282,8 @@ Backend server berlangganan ke topic berikut:
 
 Wildcard `+` membuat server menerima lokasi dari semua kendaraan.
 
-Jalankan backend server:
+Jalankan backend server secara manual hanya bila service `server` Compose sedang
+tidak digunakan; keduanya memakai port HTTP yang sama:
 
 ```bash
 unset GOROOT GOPATH
@@ -276,6 +303,11 @@ Konfigurasi server:
 | `MQTT_BROKER` | `tcp://127.0.0.1:1883` | Alamat MQTT broker |
 | `MQTT_CLIENT_ID` | `fleet-server` | ID koneksi MQTT server |
 | `DATABASE_URL` | — (wajib) | URL koneksi PostgreSQL |
+| `RABBITMQ_URL` | `amqp://fleet:fleet_local_password@127.0.0.1:5672/` | URL koneksi RabbitMQ |
+| `GEOFENCE_LATITUDE` | `-6.2090` | Latitude pusat geofence demo |
+| `GEOFENCE_LONGITUDE` | `106.8456` | Longitude pusat geofence demo |
+| `GEOFENCE_RADIUS_METERS` | `50` | Radius geofence dalam meter |
+| `GEOFENCE_EVENT_TIMEOUT` | `3s` | Batas waktu publish event RabbitMQ |
 
 Setiap pesan diperiksa sebelum diproses:
 
@@ -291,7 +323,8 @@ Setiap lokasi valid dicatat di log lalu dimasukkan ke antrean internal berukuran
 sehingga callback MQTT tidak tertahan oleh database.
 
 Saat server dihentikan, backend berhenti menerima pesan MQTT baru, menyelesaikan
-data yang sudah ada di antrean, lalu menutup koneksi PostgreSQL.
+data yang sudah ada di antrean (termasuk event geofence-nya), lalu menutup
+koneksi RabbitMQ dan PostgreSQL.
 
 ## Verifikasi Penyimpanan PostgreSQL
 
@@ -305,3 +338,80 @@ docker compose exec -T postgres \
 ```
 
 Data `vehicle_id` dan koordinat harus sesuai dengan payload mock publisher.
+
+## Geofence dan RabbitMQ
+
+Setelah lokasi berhasil tersimpan di PostgreSQL, backend menghitung jarak titik
+lokasi dari pusat geofence menggunakan rumus Haversine. Event hanya dibuat ketika
+kendaraan berubah dari **di luar** menjadi **di dalam** radius. Lokasi pertama
+sebuah kendaraan hanya menetapkan status awal, sehingga tidak langsung dianggap
+sebagai entry.
+
+Untuk data mock bawaan, pusat `(-6.2090, 106.8456)` dengan radius 50 meter
+membuat rute mock bergerak dari luar ke dalam geofence sekali pada setiap siklus.
+Backend menerbitkan event berikut ke exchange `fleet.events`, routing key
+`geofence.entry`, lalu RabbitMQ meneruskannya ke queue `geofence_alerts`:
+
+```json
+{
+  "vehicle_id": "B1234XYZ",
+  "event": "geofence_entry",
+  "location": {
+    "latitude": -6.2094,
+    "longitude": 106.8456
+  },
+  "timestamp": 1715003456
+}
+```
+
+Jalankan worker secara manual di terminal terpisah setelah RabbitMQ aktif. Jika
+`geofence-worker` sudah berjalan lewat Docker Compose, jangan menjalankan worker
+manual kedua kecuali memang ingin membagi pesan queue:
+
+```bash
+unset GOROOT GOPATH
+
+set -a
+source .env
+set +a
+
+go run ./cmd/geofenceworker
+```
+
+Worker memvalidasi, mencatat, lalu melakukan acknowledgement untuk setiap event
+dari `geofence_alerts`.
+
+### Demo Docker Compose
+
+Setelah `docker compose up --build -d`, jalankan publisher mock dari laptop:
+
+```bash
+unset GOROOT GOPATH
+go run ./cmd/publisher
+```
+
+Pada terminal lain, lihat event dan penyimpanan lokasi:
+
+```bash
+docker compose logs -f server geofence-worker
+```
+
+Backend container menerima MQTT dari Mosquitto, menyimpan lokasi ke PostgreSQL,
+lalu worker container mencatat event `processed geofence event` ketika rute mock
+memasuki geofence.
+
+### Demo Manual Tiga Terminal
+
+1. Terminal A: jalankan `go run ./cmd/server`.
+2. Terminal B: jalankan `go run ./cmd/geofenceworker`.
+3. Terminal C: jalankan `go run ./cmd/publisher`.
+
+Terminal A akan mencatat lokasi yang diterima dan terminal B akan mencatat
+`processed geofence event` saat rute mock memasuki area. Bila ingin melihat
+jumlah pesan yang menunggu di queue melalui dashboard, hentikan worker sementara
+lalu buka `http://localhost:15672`, masuk ke queue `geofence_alerts`, dan mulai
+lagi worker untuk memprosesnya.
+
+Status masuk/keluar geofence disimpan di memori proses. Untuk kebutuhan demo ini,
+restart backend akan mengosongkan status tersebut; sistem produksi sebaiknya
+menyimpan status geofence secara persisten atau membuat proses event idempoten.
