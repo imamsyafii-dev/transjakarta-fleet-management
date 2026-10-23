@@ -42,7 +42,7 @@ func Decode(payload []byte) (Location, error) {
 }
 
 func (location Location) Validate() error {
-	if err := validateVehicleID(location.VehicleID); err != nil {
+	if err := ValidateVehicleID(location.VehicleID); err != nil {
 		return fmt.Errorf("vehicle_id: %w", err)
 	}
 
@@ -79,14 +79,15 @@ func ParseTopic(topic string) (string, error) {
 	}
 
 	vehicleID := parts[3]
-	if err := validateVehicleID(vehicleID); err != nil {
+	if err := ValidateVehicleID(vehicleID); err != nil {
 		return "", fmt.Errorf("topic vehicle_id: %w", err)
 	}
 
 	return vehicleID, nil
 }
 
-func validateVehicleID(vehicleID string) error {
+// ValidateVehicleID verifies the vehicle identifier accepted by MQTT topics and HTTP paths.
+func ValidateVehicleID(vehicleID string) error {
 	if strings.TrimSpace(vehicleID) == "" {
 		return fmt.Errorf("must not be empty")
 	}

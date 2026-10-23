@@ -2,6 +2,7 @@ package location
 
 import (
 	"math"
+	"strings"
 	"testing"
 )
 
@@ -193,6 +194,34 @@ func TestDecode(t *testing.T) {
 			}
 			if location.VehicleID != "B1234XYZ" {
 				t.Fatalf("got vehicle ID %q", location.VehicleID)
+			}
+		})
+	}
+}
+
+func TestValidateVehicleID(t *testing.T) {
+	tests := []struct {
+		name      string
+		vehicleID string
+		wantErr   bool
+	}{
+		{name: "letters numbers hyphen and underscore", vehicleID: "B1234-XYZ_test"},
+		{name: "empty", vehicleID: "", wantErr: true},
+		{name: "whitespace only", vehicleID: "   ", wantErr: true},
+		{name: "space is invalid", vehicleID: "B 1234XYZ", wantErr: true},
+		{name: "too long", vehicleID: strings.Repeat("A", 65), wantErr: true},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			err := ValidateVehicleID(test.vehicleID)
+
+			if test.wantErr && err == nil {
+				t.Fatal("expected error")
+			}
+
+			if !test.wantErr && err != nil {
+				t.Fatalf("ValidateVehicleID returned error: %v", err)
 			}
 		})
 	}
