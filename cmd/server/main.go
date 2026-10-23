@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"log"
 	"net/http"
@@ -11,6 +10,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/gin-gonic/gin"
 
 	"github.com/imamsyafii-dev/transjakarta-fleet-management/internal/location"
 	"github.com/imamsyafii-dev/transjakarta-fleet-management/internal/locationapi"
@@ -86,14 +87,15 @@ func main() {
 		log.Fatalf("start MQTT subscriber: %v", err)
 	}
 
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /health", healthHandler)
+	router := gin.New()
+	router.Use(gin.Recovery())
+	router.GET("/health", healthHandler)
 
-	locationAPI.Register(mux)
+	locationAPI.Register(router)
 
 	server := &http.Server{
 		Addr:              cfg.httpAddress,
-		Handler:           mux,
+		Handler:           router,
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
@@ -154,17 +156,8 @@ func handleLocation(
 	}
 }
 
-func healthHandler(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-
-	response := map[string]string{
-		"status": "ok",
-	}
-
-	if err := json.NewEncoder(w).Encode(response); err != nil {
-		log.Printf("encode health response: %v", err)
-	}
+func healthHandler(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{"status": "ok"})
 }
 
 func logLocation(location location.Location) {

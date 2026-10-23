@@ -2,13 +2,13 @@ package locationapi
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
-	"net/url"
 	"strconv"
 	"time"
+
+	"github.com/gin-gonic/gin"
 
 	"github.com/imamsyafii-dev/transjakarta-fleet-management/internal/location"
 	"github.com/imamsyafii-dev/transjakarta-fleet-management/internal/locationstore"
@@ -49,72 +49,66 @@ func New(reader Reader, config Config) (*Handler, error) {
 	}, nil
 }
 
-func (handler *Handler) Register(mux *http.ServeMux) {
-	mux.HandleFunc(
-		"GET /vehicles/{vehicle_id}/location",
-		handler.latest,
-	)
-	mux.HandleFunc(
-		"GET /vehicles/{vehicle_id}/history",
-		handler.history,
-	)
+func (handler *Handler) Register(router gin.IRoutes) {
+	router.GET("/vehicles/:vehicle_id/location", handler.latest)
+	router.GET("/vehicles/:vehicle_id/history", handler.history)
 }
 
-func (handler *Handler) latest(w http.ResponseWriter, r *http.Request) {
-	vehicleID, ok := validatedVehicleID(w, r)
+func (handler *Handler) latest(c *gin.Context) {
+	vehicleID, ok := validatedVehicleID(c)
 	if !ok {
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(r.Context(), handler.queryTimeout)
+	ctx, cancel := context.WithTimeout(c.Request.Context(), handler.queryTimeout)
 	defer cancel()
 
 	value, err := handler.reader.Latest(ctx, vehicleID)
 	if errors.Is(err, locationstore.ErrNotFound) {
-		writeError(w, http.StatusNotFound, "vehicle location not found")
+		writeError(c, http.StatusNotFound, "vehicle location not found")
 		return
 	}
 	if err != nil {
-		writeReaderError(w, ctx, err)
+		writeReaderError(c, ctx, err)
 		return
 	}
 
-	writeJSON(w, http.StatusOK, value)
+	writeJSON(c, http.StatusOK, value)
 }
 
-func (handler *Handler) history(w http.ResponseWriter, r *http.Request) {
-	vehicleID, ok := validatedVehicleID(w, r)
+func (handler *Handler) history(c *gin.Context) {
+	vehicleID, ok := validatedVehicleID(c)
 	if !ok {
 		return
 	}
 
-	start, err := requiredTimestamp(r.URL.Query(), "start")
+	start, err := requiredTimestamp(c.QueryArray("start"), "start")
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		writeError(c, http.StatusBadRequest, err.Error())
 		return
 	}
 
-	end, err := requiredTimestamp(r.URL.Query(), "end")
+	end, err := requiredTimestamp(c.QueryArray("end"), "end")
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		writeError(c, http.StatusBadRequest, err.Error())
 		return
 	}
 
 	if start > end {
 		writeError(
-			w,
+			c,
 			http.StatusBadRequest,
 			"start must not be after end",
 		)
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(r.Context(), handler.queryTimeout)
+	ctx, cancel := context.WithTimeout(c.Request.Context(), handler.queryTimeout)
 	defer cancel()
 
 	values, err := handler.reader.History(ctx, vehicleID, start, end)
 	if err != nil {
-		writeReaderError(w, ctx, err)
+		writeReaderError(c, ctx, err)
 		return
 	}
 
@@ -122,17 +116,14 @@ func (handler *Handler) history(w http.ResponseWriter, r *http.Request) {
 		values = make([]location.Location, 0)
 	}
 
-	writeJSON(w, http.StatusOK, values)
+	writeJSON(c, http.StatusOK, values)
 }
 
-func validatedVehicleID(
-	w http.ResponseWriter,
-	r *http.Request,
-) (string, bool) {
-	vehicleID := r.PathValue("vehicle_id")
+func validatedVehicleID(c *gin.Context) (string, bool) {
+	vehicleID := c.Param("vehicle_id")
 
 	if err := location.ValidateVehicleID(vehicleID); err != nil {
-		writeError(w, http.StatusBadRequest, "vehicle_id is invalid")
+		writeError(c, http.StatusBadRequest, "vehicle_id is invalid")
 		return "", false
 	}
 
@@ -140,11 +131,10 @@ func validatedVehicleID(
 }
 
 func requiredTimestamp(
-	query url.Values,
+	values []string,
 	name string,
 ) (int64, error) {
-	values, exists := query[name]
-	if !exists {
+	if len(values) == 0 {
 		return 0, fmt.Errorf("%s query parameter is required", name)
 	}
 
@@ -167,34 +157,31 @@ func requiredTimestamp(
 }
 
 func writeReaderError(
-	w http.ResponseWriter,
+	c *gin.Context,
 	ctx context.Context,
 	err error,
 ) {
 	if errors.Is(err, context.DeadlineExceeded) ||
 		errors.Is(ctx.Err(), context.DeadlineExceeded) {
-		writeError(w, http.StatusGatewayTimeout, "location query timed out")
+		writeError(c, http.StatusGatewayTimeout, "location query timed out")
 		return
 	}
 
-	writeError(w, http.StatusInternalServerError, "internal server error")
+	writeError(c, http.StatusInternalServerError, "internal server error")
 }
 
 func writeError(
-	w http.ResponseWriter,
+	c *gin.Context,
 	status int,
 	message string,
 ) {
-	writeJSON(w, status, errorResponse{Error: message})
+	writeJSON(c, status, errorResponse{Error: message})
 }
 
 func writeJSON(
-	w http.ResponseWriter,
+	c *gin.Context,
 	status int,
 	payload any,
 ) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-
-	_ = json.NewEncoder(w).Encode(payload)
+	c.JSON(status, payload)
 }

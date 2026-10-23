@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gin-gonic/gin"
+
 	"github.com/imamsyafii-dev/transjakarta-fleet-management/internal/location"
 	"github.com/imamsyafii-dev/transjakarta-fleet-management/internal/locationstore"
 )
@@ -60,7 +62,7 @@ func newMux(
 	t *testing.T,
 	reader Reader,
 	timeout time.Duration,
-) *http.ServeMux {
+) *gin.Engine {
 	t.Helper()
 
 	handler, err := New(reader, Config{
@@ -70,10 +72,12 @@ func newMux(
 		t.Fatalf("create handler: %v", err)
 	}
 
-	mux := http.NewServeMux()
-	handler.Register(mux)
+	gin.SetMode(gin.TestMode)
 
-	return mux
+	router := gin.New()
+	handler.Register(router)
+
+	return router
 }
 
 func decodeError(
@@ -322,7 +326,7 @@ func TestHistoryReturnsEmptyArray(t *testing.T) {
 		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusOK)
 	}
 
-	if body := recorder.Body.String(); body != "[]\n" {
+	if body := recorder.Body.String(); body != "[]" {
 		t.Fatalf("body = %q, want []", body)
 	}
 }
