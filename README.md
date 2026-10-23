@@ -6,7 +6,7 @@ RabbitMQ.
 
 ## Status
 
-Tahap 4: fondasi Go, infrastruktur lokal, schema database, dan mock MQTT publisher.
+Tahap 5: fondasi Go, infrastruktur lokal, schema database, MQTT publisher, dan MQTT subscriber tervalidasi.
 
 ## Requirements
 
@@ -169,3 +169,39 @@ docker compose exec mosquitto \
 
 Publisher mengirim payload JSON dengan QoS 1 dan `retained=false`.
 Tekan `Ctrl+C` untuk menghentikannya secara rapi.
+
+## MQTT Subscriber
+
+Backend server berlangganan ke topic berikut:
+
+```text
+/fleet/vehicle/+/location
+```
+
+Wildcard `+` membuat server menerima lokasi dari semua kendaraan.
+
+Jalankan backend server:
+
+```bash
+unset GOROOT GOPATH
+go run ./cmd/server
+```
+
+Konfigurasi server:
+
+| Variable | Default | Fungsi |
+| --- | --- | --- |
+| `HTTP_ADDRESS` | `:8080` | Alamat HTTP server |
+| `MQTT_BROKER` | `tcp://127.0.0.1:1883` | Alamat MQTT broker |
+| `MQTT_CLIENT_ID` | `fleet-server` | ID koneksi MQTT server |
+
+Setiap pesan diperiksa sebelum diproses:
+
+- Topic harus cocok dengan `/fleet/vehicle/{vehicle_id}/location`.
+- Payload harus berupa satu objek JSON valid.
+- Field asing pada JSON ditolak.
+- `vehicle_id` payload harus sama dengan ID pada topic.
+- Latitude, longitude, dan timestamp harus valid.
+
+Pada tahap ini, lokasi valid ditampilkan ke log server. Penyimpanan ke
+PostgreSQL akan ditambahkan pada tahap berikutnya.
