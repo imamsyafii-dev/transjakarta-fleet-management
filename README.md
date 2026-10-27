@@ -200,6 +200,10 @@ diterapkan; buat file migration baru dengan nomor berikutnya.
 Migration pertama membuat tabel `vehicle_locations` untuk menyimpan riwayat
 lokasi kendaraan.
 
+> Catatan: spesifikasi mencantumkan nama tabel `vehicle_loctions`. Implementasi
+> menggunakan `vehicle_locations` sebagai koreksi penamaan, tanpa mengubah
+> struktur kolom atau perilaku yang diminta.
+
 | Kolom | Fungsi |
 | --- | --- |
 | `id` | Identitas unik internal setiap data lokasi |
